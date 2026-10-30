@@ -1,0 +1,40 @@
+name: Tark permissions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  permissions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install filesystem isolation
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Native platform permission tests
+        working-directory: packages/coding-agent
+        env:
+          TARK_REQUIRE_SANDBOX: '1'
+        run: node ../../node_modules/vitest/dist/cli.js --run test/tark-command-policy.test.ts test/rpc-auth.test.ts test/rpc-environment.test.ts test/suite/tark-rpc-auth.test.ts
+      - name: Strict real bubblewrap isolation tests
+        if: runner.os == 'Linux'
+        working-directory: packages/coding-agent
+        env:
+          TARK_REQUIRE_SANDBOX: '1'
+        run: node ../../node_modules/vitest/dist/cli.js --run test/tark-sandbox.test.ts
