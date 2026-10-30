@@ -171,7 +171,10 @@ async function startRpcMode(options: Parameters<typeof createRuntimeHost>[0]): P
 	void runRpcMode(runtimeHost);
 	await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
 
-	return { lineHandler: rpcIo.lineHandler!, cleanup };
+	const token = "a".repeat(64);
+	const raw = rpcIo.lineHandler!;
+	raw(JSON.stringify({ type: "authenticate", token }));
+	return { lineHandler: (line) => raw(JSON.stringify({ ...JSON.parse(line), authToken: token })), cleanup };
 }
 
 describe("RPC prompt response semantics", () => {

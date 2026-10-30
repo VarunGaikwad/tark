@@ -1,4 +1,4 @@
-// Phase-1 workflow proof through AgentSession and the local faux provider; no real providers or builders.
+// Workflow and permission proofs through AgentSession and the faux provider; no real providers or builders.
 import {
 	existsSync,
 	mkdirSync,
@@ -13,12 +13,14 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { AgentToolCallOutcome } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, type JsonObject } from "@earendil-works/pi-ai";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionUIContext } from "../../src/core/extensions/types.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { withFileMutationQueue } from "../../src/core/tools/file-mutation-queue.ts";
 import agents from "../../src/extensions/tark/agents.ts";
+import * as commandExecution from "../../src/extensions/tark/lib/command-execution.ts";
 import * as subagentRunner from "../../src/extensions/tark/lib/subagent-runner.ts";
 import { loadWorkflowSnapshot, WORKFLOW_LIMITS } from "../../src/extensions/tark/lib/workflow-state.ts";
 import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
@@ -412,6 +414,15 @@ describe("explicit revision-bound user approval", () => {
 		await harness.session.prompt("/profile ask");
 		expect((await call(harness, "write", { path: "src/file.ts", content: "blocked" })).isError).toBe(true);
 		await harness.session.prompt("/profile debug");
+		expect((await call(harness, "write", { path: "src/file.ts", content: "blocked before evidence" })).isError).toBe(
+			true,
+		);
+		await call(harness, "debug_workflow", { action: "reproduce", evidence: "Concrete fixture failure" });
+		await call(harness, "debug_workflow", {
+			action: "infeasible",
+			evidence:
+				"No runnable fixture in this test; alternative verification: inspect resulting source. Runtime checks not run.",
+		});
 		expect((await call(harness, "write", { path: "src/file.ts", content: "allowed" })).isError).toBe(false);
 		expect(setStatus).toHaveBeenCalledWith("tark-agent", "debug · write");
 	});
@@ -485,7 +496,7 @@ describe("execution-boundary enforcement", () => {
 					name === "bash" || name === "powershell" ? { command: "echo unsafe > source" } : {},
 				);
 				expect(result.isError).toBe(true);
-				expect(getMessageText(result)).toMatch(/unavailable|not found/);
+				expect(getMessageText(result)).toMatch(/unavailable|not found|no general bash/);
 			}
 			expect(executed).not.toHaveBeenCalled();
 			expect(existsSync(join(harness.tempDir, "source"))).toBe(false);
@@ -578,6 +589,131 @@ describe("execution-boundary enforcement", () => {
 		const { harness, setStatus } = await setup({ agent });
 		expect(setStatus).toHaveBeenCalledWith("tark-agent", `${agent} · read`);
 		expect((await call(harness, "write", { path: "src/file.ts", content: "blocked" })).isError).toBe(true);
+	});
+});
+
+describe("Phase-2 command execution boundaries", () => {
+	it("emits an incomplete-debug warning even in non-interactive results", async () => {
+		const { harness } = await setup({ mode: "json", agent: "debug" });
+		harness.setResponses([fauxAssistantMessage("Claimed complete without verification")]);
+		await harness.session.prompt("Investigate the fixture failure");
+		const warning = harness.session.messages.find(
+			(message) => message.role === "custom" && message.customType === "tark-debug-incomplete",
+		);
+		expect(warning).toBeDefined();
+		expect(getMessageText(warning!)).toContain("Debug workflow incomplete");
+	});
+
+	it("preserves profile completion while routing selection through user-only input", async () => {
+		const addAutocompleteProvider = vi.fn<ExtensionUIContext["addAutocompleteProvider"]>();
+		await setup({ mode: "tui", ui: { addAutocompleteProvider } });
+		const current: AutocompleteProvider = {
+			getSuggestions: async () => null,
+			applyCompletion: (lines, cursorLine, cursorCol) => ({ lines, cursorLine, cursorCol }),
+		};
+		const provider = addAutocompleteProvider.mock.calls[0][0](current);
+		const options = { signal: new AbortController().signal };
+		expect(await provider.getSuggestions(["/pro"], 0, 4, options)).toMatchObject({
+			prefix: "/pro",
+			items: [{ value: "profile" }],
+		});
+		expect(await provider.getSuggestions(["/profile de"], 0, 11, options)).toMatchObject({
+			prefix: "de",
+			items: [{ value: "debug" }],
+		});
+	});
+
+	it("permits audited read argv in ask/plan, denies normal commands and orchestrator bash", async () => {
+		const run = vi
+			.spyOn(commandExecution, "executeSafeGit")
+			.mockResolvedValue({ exitCode: 0, output: "read only", omittedBytes: 0, termination: "exit" });
+		const { harness } = await setup();
+		for (const profile of ["ask", "plan"]) {
+			await harness.session.prompt(`/profile ${profile}`);
+			expect((await call(harness, "bash", { command: "git diff --stat" })).isError).toBe(false);
+			expect((await call(harness, "bash", { command: "npm test" })).isError).toBe(true);
+		}
+		expect(run).toHaveBeenCalledTimes(2);
+		await harness.session.prompt("/profile orchestrator");
+		expect((await call(harness, "bash", { command: "git diff" })).isError).toBe(true);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	it("requires exact per-invocation dangerous approval and still uses read-only isolation", async () => {
+		const run = vi
+			.spyOn(commandExecution, "executeReadOnlySandbox")
+			.mockResolvedValue({ exitCode: 0, output: "approved", omittedBytes: 0, termination: "exit" });
+		const confirm = vi.fn<ExtensionUIContext["confirm"]>(async () => true);
+		const { harness } = await setup({ ui: { confirm } });
+		await saveAndApprove(harness);
+		for (let i = 0; i < 2; i++)
+			expect((await call(harness, "bash", { command: "git push --force" })).isError).toBe(false);
+		expect(confirm).toHaveBeenCalledTimes(2);
+		expect(confirm.mock.calls[0]).toEqual(expect.arrayContaining([expect.stringContaining("git push --force")]));
+		expect(run).toHaveBeenCalledTimes(2);
+		confirm.mockResolvedValue(false);
+		expect((await call(harness, "bash", { command: "git push --force" })).isError).toBe(true);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	it("blocks dangerous commands without interactive consent even with persisted plan approval", async () => {
+		const run = vi.spyOn(commandExecution, "executeReadOnlySandbox");
+		const parent = await setup();
+		await saveAndApprove(parent.harness);
+		const resumed = await setup({
+			mode: "json",
+			cwd: parent.harness.tempDir,
+			agentDir: parent.agentDir,
+			sessionManager: parent.harness.sessionManager,
+		});
+		expect((await call(resumed.harness, "bash", { command: "git push --force" })).isError).toBe(true);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("requires explicitly named check configuration files even under an approved directory", async () => {
+		const { harness } = await setup();
+		await saveAndApprove(harness);
+		expect((await call(harness, "write", { path: "src/package.json", content: "{}" })).isError).toBe(true);
+		await call(harness, "save_plan", { ...planInput, tasks: [{ ...tasks[0], allowed_paths: ["src/package.json"] }] });
+		await harness.session.prompt("/approve-plan");
+		expect((await call(harness, "write", { path: "src/package.json", content: "{}" })).isError).toBe(false);
+	});
+
+	it("rejects indirect shell bypasses, arbitrary check arguments, and injected Agent switching", async () => {
+		const { harness, setStatus } = await setup({ extra: nestedTools });
+		await harness.session.prompt("/profile plan");
+		await harness.session.prompt("/profile code", { source: "extension", expandPromptTemplates: true });
+		expect(setStatus).not.toHaveBeenCalledWith("tark-agent", "code · write");
+		const response = await call(harness, "askquestions", {
+			calls: [
+				{ name: "bash", input: { command: "npm install" } },
+				{ name: "bash", input: { command: "git diff; node evil" } },
+				{ name: "run_checks", input: { check: "test", command: "node evil" } },
+			],
+		});
+		const results: AgentToolCallOutcome[] = JSON.parse(getMessageText(response));
+		expect(results.every((result) => result.isError)).toBe(true);
+	});
+
+	it("runs configured checks for orchestrator and blocks changed commands after denial", async () => {
+		const run = vi
+			.spyOn(commandExecution, "executeReadOnlySandbox")
+			.mockResolvedValue({ exitCode: 0, output: "checked", omittedBytes: 0, termination: "exit" });
+		const confirm = vi.fn<ExtensionUIContext["confirm"]>(async () => true);
+		const { harness } = await setup({ ui: { confirm } });
+		mkdirSync(join(harness.tempDir, ".tark"));
+		const configPath = join(harness.tempDir, ".tark/checks.json");
+		writeFileSync(configPath, JSON.stringify({ test: { executable: process.execPath, args: ["original"] } }));
+		await harness.session.prompt("/profile orchestrator");
+		expect((await call(harness, "run_checks", { check: "test" })).isError).toBe(false);
+		expect(getMessageText(getToolResult(harness, "run_checks"))).toContain("counts unknown");
+		writeFileSync(configPath, JSON.stringify({ test: { executable: process.execPath, args: ["changed"] } }));
+		confirm.mockResolvedValue(false);
+		expect((await call(harness, "run_checks", { check: "test" })).isError).toBe(true);
+		expect(run).toHaveBeenCalledTimes(1);
+		const review = String(confirm.mock.calls.at(-1)?.[1]);
+		expect(review).toContain("original");
+		expect(review).toContain("changed");
 	});
 });
 

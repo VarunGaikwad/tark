@@ -195,6 +195,22 @@
       "$ref": "#/$defs/KeybindingValue",
       "description": "Scroll viewport to bottom"
     },
+    "app.profile.cycle": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Cycle Tark agent profile"
+    },
+    "app.question.toggle": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Toggle question choice"
+    },
+    "app.question.next": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Next question"
+    },
+    "app.question.previous": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Previous question"
+    },
     "app.interrupt": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Cancel or abort"

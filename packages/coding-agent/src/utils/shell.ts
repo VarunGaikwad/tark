@@ -2,6 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, join, win32 } from "node:path";
 import { spawn, spawnSync } from "child_process";
 import { getBinDir } from "../config.ts";
+import { withoutRpcEnvironment } from "./rpc-environment.ts";
 
 export interface ShellConfig {
 	shell: string;
@@ -176,10 +177,10 @@ export function getShellEnv(): NodeJS.ProcessEnv {
 	const hasBinDir = pathEntries.includes(binDir);
 	const updatedPath = hasBinDir ? currentPath : [binDir, currentPath].filter(Boolean).join(delimiter);
 
-	return {
+	return withoutRpcEnvironment({
 		...process.env,
 		[pathKey]: updatedPath,
-	};
+	});
 }
 
 /**

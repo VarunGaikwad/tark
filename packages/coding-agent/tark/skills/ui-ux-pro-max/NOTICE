@@ -1,0 +1,16 @@
+UI UX Pro Max
+Copyright (c) 2024 Next Level Builder
+
+Source: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
+Commit: 56ea9cf174ed86786187daa9de0e6247cb0747e4
+License: MIT (see LICENSE).
+
+Bundled content: the upstream .claude/skills/ui-ux-pro-max/SKILL.md and
+references, plus src/ui-ux-pro-max/data and the four Python search runtime
+modules (search.py, core.py, design_system.py, reasoning_contract.py).
+
+Piexis modifies SKILL.md to use host-resolved skill paths instead of
+CLAUDE_PLUGIN_ROOT and to report missing Python without installing it.
+The Python runtime, data, and reference files are bundled unchanged.
+Catalog provenance and font/icon license metadata are retained in data/;
+font binaries and icon packages are not bundled.

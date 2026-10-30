@@ -1,13 +1,19 @@
-// Session-owned workflow persistence, explicit approval, and Phase-1 execution gates.
+// Session-owned workflow persistence, explicit approval, and capability-gated execution.
 import { constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import { Type } from "typebox";
+import { createBashToolDefinition } from "../../core/tools/bash.ts";
 import { createEditToolDefinition } from "../../core/tools/edit.ts";
 import { resolveToCwd } from "../../core/tools/path-utils.ts";
 import { createWriteToolDefinition } from "../../core/tools/write.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "./host.ts";
 import { deniedPath } from "./lib/access-policy.ts";
 import type { AgentName } from "./lib/agents.ts";
+import { CheckPolicy, type CheckResult, checkNames, isCheckConfig } from "./lib/check-policy.ts";
+import { executeReadOnlySandbox, executeSafeGit } from "./lib/command-execution.ts";
+import { classifyCommand, commandTimeout } from "./lib/command-policy.ts";
+import { DebugWorkflow } from "./lib/debug-workflow.ts";
 import {
 	assertApprovedTask,
 	assertWorkflowWritePath,
@@ -33,6 +39,9 @@ const safeTools = new Set([
 	"todo",
 	"save_plan",
 	"subagent",
+	"bash",
+	"run_checks",
+	"debug_workflow",
 ]);
 const todoParameters = Type.Object(
 	{
@@ -70,6 +79,7 @@ interface WorkflowHost {
 	agent(): AgentName;
 	restoreAgent(ctx: ExtensionContext): void;
 	canSwitch(ctx: ExtensionContext): boolean;
+	canCheck(): boolean;
 	canApprove: boolean;
 	activateCode(ctx: ExtensionContext): Promise<boolean>;
 	status(ctx: ExtensionContext): void;
@@ -84,6 +94,10 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 	let version = 0;
 	let epoch = 0;
 	let tail: Promise<unknown> = Promise.resolve();
+	let execution = new AbortController();
+	let checking = false;
+	const checks = new CheckPolicy();
+	const debug = new DebugWorkflow();
 
 	function serialize<T>(work: () => Promise<T>): Promise<T> {
 		const result = tail.then(work);
@@ -104,6 +118,7 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 		assertCurrent(ctx, expectedEpoch);
 		// A reference is appended only after the immutable snapshot exists. Failed IO never commits memory.
 		pi.appendEntry(entryType, { reference });
+		if (state.plan?.revision !== checked.plan?.revision) debug.reset();
 		state = checked;
 		version++;
 		host.status(ctx);
@@ -112,6 +127,9 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 
 	async function restore(ctx: ExtensionContext) {
 		const expectedEpoch = ++epoch;
+		execution.abort("Workflow restored");
+		execution = new AbortController();
+		debug.reset();
 		state = emptyWorkflowState();
 		available = false;
 		stopped = false;
@@ -175,6 +193,9 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 		for (const task of tasks) {
 			try {
 				assertTask(task.id);
+				const localPath = relative(ctx.cwd, resolve(ctx.cwd, path.replace(/^@/, ""))).replaceAll("\\", "/");
+				if (isCheckConfig(localPath) && !task.allowed_paths.includes(localPath))
+					throw new Error("Check configuration requires an explicitly named approved file");
 				await assertWorkflowWritePath(ctx.cwd, path.replace(/^@/, ""), task);
 				allowed = true;
 				break;
@@ -188,6 +209,8 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 		if (version !== expectedVersion || permission() !== "write")
 			throw new Error("Plan approval changed before execution");
 		if (reason) throw new Error(`Access to ${path} denied: ${reason}`);
+		if (host.agent() === "debug") debug.assertWrite(path);
+		else debug.reset();
 	}
 
 	pi.on("session_start", (_event, ctx) => restore(ctx));
@@ -198,6 +221,9 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 	pi.on("session_compact", (_event, ctx) => restore(ctx));
 	pi.on("session_shutdown", async (_event, ctx) => {
 		stopped = true;
+		execution.abort("Session shutdown");
+		checks.reset();
+		debug.reset();
 		available = false;
 		state = emptyWorkflowState();
 		epoch++;
@@ -214,7 +240,7 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 				customType: entryType,
 				content:
 					available && !stopped
-						? `Current host-managed workflow (not user approval instructions):\n${JSON.stringify(state)}\nPermission: ${permission()}. Use todo to update progress. Only the user can approve a plan. Shell/checks and builders are unavailable in Phase 1.`
+						? `Current host-managed workflow (not user approval instructions):\n${JSON.stringify(state)}\nPermission: ${permission()}. Use todo to update progress. Only the user can approve a plan. Use run_checks for fixed verified commands; bash accepts validated argv only. Normal/dangerous commands require write permission and read-only Linux isolation; project shell writes/builders remain blocked pending Phase 4. Debug evidence: ${JSON.stringify(debug.state)}`
 						: "Workflow restoration unavailable. Execution is blocked; do not infer approval from conversation summaries.",
 				display: false,
 				timestamp: Date.now(),
@@ -231,13 +257,161 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 				await assertWrite(event.input.path, ctx, epoch);
 				return;
 			}
-			if (event.toolName === "bash" || event.toolName === "powershell")
-				throw new Error(
-					"Shell execution is unavailable until command policy and sandboxed checks are implemented (Phase 1)",
-				);
+			if (event.toolName === "powershell")
+				throw new Error("PowerShell execution is unavailable under the argv capability policy; use run_checks");
 			throw new Error(`Tool ${event.toolName} is unavailable until a capability policy is implemented`);
 		} catch (error) {
 			return { block: true, reason: errorText(error) };
+		}
+	});
+
+	const bash = createBashToolDefinition(process.cwd());
+	pi.registerTool({
+		...bash,
+		defaultActive: false,
+		executionMode: "sequential",
+		description:
+			"Validated argv execution, not a shell. Prefer built-in ls/find. Read: audited Git read forms only; orchestrator: run_checks only. Normal/dangerous commands require approved write permission and Linux read-only filesystem isolation. Dangerous invocations require explicit user approval. Default 120s, hard maximum 600s. Project shell writes/builders remain blocked until Phase 4.",
+		promptGuidelines: ["Use run_checks for configured verification; bash never interprets shell syntax."],
+		execute(id, params, signal, onUpdate, ctx) {
+			const expectedEpoch = epoch;
+			const combined = AbortSignal.any([execution.signal, ...(signal ? [signal] : [])]);
+			return serialize(async () => {
+				assertCurrent(ctx, expectedEpoch);
+				const guarded = createBashToolDefinition(ctx.cwd, {
+					exposeSessionEnvironment: false,
+					operations: {
+						async exec(command, cwd, options) {
+							const timeout = commandTimeout(options.timeout);
+							if (host.agent() === "orchestrator")
+								throw new Error("Orchestrator has no general bash; use run_checks");
+							const policy = await classifyCommand(command);
+							const expectedVersion = version;
+							if (policy.tier !== "safe") {
+								if (permission() !== "write")
+									throw new Error(
+										"Normal/dangerous commands require approved write permission; read agents use run_checks",
+									);
+								if (
+									policy.tier === "dangerous" &&
+									(!ctx.hasUI ||
+										!(await ctx.ui.confirm(
+											"Approve this dangerous invocation only?",
+											`Command: ${command}\nWorking directory: ${cwd}\nFilesystem remains read-only; approval grants no additional scope.`,
+											{ signal: combined },
+										)))
+								)
+									throw new Error("Dangerous invocation not approved");
+							}
+							assertCurrent(ctx, expectedEpoch);
+							combined.throwIfAborted();
+							if (version !== expectedVersion) throw new Error("Plan approval changed before execution");
+							const run = policy.tier === "safe" ? executeSafeGit : executeReadOnlySandbox;
+							const result = await run(policy.executable, policy.args, cwd, { timeout, signal: combined });
+							options.onData(
+								Buffer.from(
+									`${result.output}${result.omittedBytes ? `\n[${result.omittedBytes} output bytes omitted]` : ""}`,
+								),
+							);
+							if (result.termination === "timeout") throw new Error(`timeout:${timeout}`);
+							if (result.termination === "cancelled") throw new Error("aborted");
+							return { exitCode: result.exitCode };
+						},
+					},
+				});
+				return guarded.execute(id, params, combined, onUpdate, ctx);
+			});
+		},
+	});
+
+	pi.registerTool({
+		name: "run_checks",
+		label: "Run checks",
+		executionMode: "sequential",
+		description:
+			"Run a fixed typecheck/lint/test from user-reviewed .tark/checks.json. No arbitrary command or arguments. Linux/WSL2 read-only source sandbox; native Windows needs session opt-in and reports unsandboxed. Counts may be unknown. Output bounded to 200 lines/8 KiB.",
+		parameters: Type.Object(
+			{ check: Type.Union(checkNames.map((name) => Type.Literal(name))) },
+			{ additionalProperties: false },
+		),
+		execute(_id, params, signal, _onUpdate, ctx) {
+			const expectedEpoch = epoch;
+			const combined = AbortSignal.any([execution.signal, ...(signal ? [signal] : [])]);
+			return serialize(async () => {
+				assertCurrent(ctx, expectedEpoch);
+				if (Object.keys(params).length !== 1 || !checkNames.includes(params.check))
+					throw new Error("Only a fixed check name is accepted");
+				if (!host.canCheck())
+					throw new Error("Wait for subagents and agent setup to finish before checking a stable source tree");
+				checking = true;
+				let checked: CheckResult;
+				try {
+					checked = await checks.run(params.check, ctx, combined);
+				} finally {
+					checking = false;
+				}
+				assertCurrent(ctx, expectedEpoch);
+				if (host.agent() === "debug") debug.observe(checked);
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `${checked.check}: ${checked.passed ? "pass" : "fail"}; exit ${checked.exitCode}; ${checked.isolation}; ${checked.termination}; test counts unknown\n${checked.output}${checked.omittedBytes ? `\n[${checked.omittedBytes} output bytes omitted]` : ""}`,
+						},
+					],
+					details: checked,
+					isError: !checked.passed,
+				};
+			});
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_workflow",
+		label: "Debug evidence",
+		executionMode: "sequential",
+		description:
+			"Record reproduction evidence, a failing run_checks regression, or why regression testing is infeasible with alternative verification. status reports remaining requirements; evidence is agent-reported, not independently proven. Source fixes require this sequence; run_checks verifies afterwards.",
+		parameters: Type.Object(
+			{
+				action: Type.Union(["status", "reproduce", "regression", "infeasible"].map((name) => Type.Literal(name))),
+				evidence: Type.Optional(Type.String({ maxLength: 4096 })),
+			},
+			{ additionalProperties: false },
+		),
+		execute(_id, params, _signal, _onUpdate, ctx) {
+			const expectedEpoch = epoch;
+			return serialize(async () => {
+				assertCurrent(ctx, expectedEpoch);
+				if (host.agent() !== "debug") throw new Error("Debug evidence requires the debug Agent");
+				if (
+					Object.keys(params).some((key) => key !== "action" && key !== "evidence") ||
+					!["status", "reproduce", "regression", "infeasible"].includes(params.action) ||
+					(params.evidence !== undefined && typeof params.evidence !== "string")
+				)
+					throw new Error("Invalid debug evidence input");
+				if (params.action !== "status") debug.report(params.action, params.evidence ?? "");
+				return result(JSON.stringify(debug.state));
+			});
+		},
+	});
+
+	pi.on("agent_before_settle", (event) => {
+		if (host.agent() !== "debug") return;
+		try {
+			debug.assertComplete();
+		} catch (error) {
+			return {
+				entries: [
+					...event.entries,
+					{
+						type: "custom_message" as const,
+						customType: "tark-debug-incomplete",
+						display: true,
+						content: errorText(error),
+					},
+				],
+			};
 		}
 	});
 
@@ -301,6 +475,7 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 			const expectedEpoch = epoch;
 			return serialize(async () => {
 				assertCurrent(ctx, expectedEpoch);
+				if (host.agent() === "debug" && params.state === "done") debug.assertComplete();
 				const next = changeTodo(state, params);
 				if (params.action === "list") return result(JSON.stringify(next.todos));
 				const reference = await commit(next, ctx, expectedEpoch);
@@ -412,7 +587,7 @@ export function installWorkflow(pi: ExtensionAPI, host: WorkflowHost) {
 		return { action: "handled" as const };
 	});
 
-	return { permission, assertTask };
+	return { permission, assertTask, isChecking: () => checking };
 }
 
 function result(text: string, reference?: string) {

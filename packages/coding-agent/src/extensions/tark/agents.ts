@@ -93,6 +93,7 @@ export default function agentsExtension(pi: ExtensionAPI) {
 		agent: () => active,
 		restoreAgent: restore,
 		canSwitch,
+		canCheck: () => jobs.size === 0 && !switching && !configuring,
 		canApprove: depth === 0 && inheritedScope?.mode !== "read",
 		activateCode: (ctx) => activate("code", ctx, "manual"),
 		status,
@@ -192,6 +193,31 @@ export default function agentsExtension(pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (event, ctx) => {
+		if (!startupHandled && ctx.mode === "tui")
+			ctx.ui.addAutocompleteProvider((current) => ({
+				async getSuggestions(lines, line, column, options) {
+					const text = (lines[line] ?? "").slice(0, column);
+					const args = /^\/profile (.*)$/.exec(text);
+					if (args) {
+						const items = profileChoices
+							.filter((choice) => choice.startsWith(args[1]))
+							.map((value) => ({ value, label: value }));
+						return items.length ? { items, prefix: args[1] } : null;
+					}
+					const existing = await current.getSuggestions(lines, line, column, options);
+					if (/^\/\S*$/.test(text) && "/profile".startsWith(text))
+						return {
+							items: [
+								...(existing?.items ?? []),
+								{ value: "profile", label: "profile", description: "User-only Agent selection" },
+							],
+							prefix: text,
+						};
+					return existing;
+				},
+				applyCompletion: (...args) => current.applyCompletion(...args),
+				shouldTriggerFileCompletion: (...args) => current.shouldTriggerFileCompletion?.(...args) ?? true,
+			}));
 		if (jobs.size === 0) scheduler = new SubagentScheduler();
 		restore(ctx);
 		childStatus(ctx);
@@ -407,37 +433,41 @@ export default function agentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("profile", {
-		description: "User-only agent selection; selecting code/debug does not approve writes",
-		getArgumentCompletions: (prefix) => {
-			const matches = profileChoices.filter((choice) => choice.startsWith(prefix));
-			return matches.length > 0 ? matches.map((choice) => ({ value: choice, label: choice })) : null;
-		},
-		handler: async (args, ctx) => {
-			await ctx.waitForIdle();
-			let name: string | undefined = args.trim() || undefined;
-			if (!name) {
-				if (!ctx.hasUI) {
-					ctx.ui.notify(`Current agent: ${active}. Use /profile <${profileChoices.join("|")}>.`, "info");
-					return;
-				}
-				name = await ctx.ui.select(`Agent profile (current: ${active})`, profileChoices);
-				if (!name) return;
-			}
-			if (name === "auto") {
-				ctx.ui.notify(
-					"Automatic routing is disabled. Only the user can change Agent or approve write permission.",
-					"info",
-				);
-				return;
-			}
-			if (!isAgentName(name)) {
-				ctx.ui.notify(`Unknown agent: ${name}. Choose ${profileChoices.join(", ")}.`, "error");
-				return;
-			}
-			await activate(name, ctx, "manual");
-		},
+	// Input provenance is available here, unlike extension command handlers. Injected commands must never switch Agent.
+	pi.on("input", async (event, ctx) => {
+		const match = /^\/profile(?:\s+(.*))?\s*$/.exec(event.text);
+		if (!match) return { action: "continue" as const };
+		if ((event.source !== "interactive" && event.source !== "rpc") || depth > 0) {
+			ctx.ui.notify("Agent selection requires direct main-session user input.", "warning");
+			return { action: "handled" as const };
+		}
+		await selectProfile(match[1] ?? "", ctx);
+		return { action: "handled" as const };
 	});
+
+	async function selectProfile(args: string, ctx: ExtensionContext) {
+		let name: string | undefined = args.trim() || undefined;
+		if (!name) {
+			if (!ctx.hasUI) {
+				ctx.ui.notify(`Current agent: ${active}. Use /profile <${profileChoices.join("|")}>.`, "info");
+				return;
+			}
+			name = await ctx.ui.select(`Agent profile (current: ${active})`, profileChoices);
+			if (!name) return;
+		}
+		if (name === "auto") {
+			ctx.ui.notify(
+				"Automatic routing is disabled. Only the user can change Agent or approve write permission.",
+				"info",
+			);
+			return;
+		}
+		if (!isAgentName(name)) {
+			ctx.ui.notify(`Unknown agent: ${name}. Choose ${profileChoices.join(", ")}.`, "error");
+			return;
+		}
+		await activate(name, ctx, "manual");
+	}
 
 	for (const key of KeybindingsManager.create().getKeys("app.profile.cycle"))
 		pi.registerShortcut(key, {
@@ -454,7 +484,7 @@ export default function agentsExtension(pi: ExtensionAPI) {
 			depth > 0
 				? `You are a delegated subagent. Work only on the supplied task.${inheritedScope ? ` Declared ownership: ${inheritedScope.mode}; paths: ${JSON.stringify(inheritedScope.paths)}. Modify only these paths (an empty write list means broad ownership); keep nested delegation within this ownership.` : ""} If user input is needed, return the question to the parent; no terminal interaction is available. Report changed files, results, and unexecuted checks. If the subagent tool is available, use purpose: explore only for bounded read-only codebase exploration and return concise file paths, line numbers, and uncertainties.`
 				: "All five profiles are callable through subagent. Delegate only when a separate context helps; supply a focused task and all relevant context. For bounded codebase exploration involving discovery, several files, or a summary, delegate to subagent with agent: ask and purpose: explore. It uses small_model when configured, otherwise the current model, and must return concise findings with file paths, line numbers, and uncertainties. Keep planning, judgment, edits, and final verification here; do not delegate a trivial single read."
-		}\nPermission: ${workflow.permission()}. Selecting code/debug or --agent does not grant writes. Read the current saved plan and active task scope before editing; update progress with todo. Phase 1 blocks all shell commands, arbitrary extension/MCP tools, and builders pending command policy, sandboxed checks, and builder isolation. Only the user changes Agent or approves a plan.`;
+		}\nPermission: ${workflow.permission()}. Selecting code/debug or --agent does not grant writes. Read the current saved plan and active task scope before editing; update progress with todo. Use run_checks for fixed configured verification, and bash only for validated argv commands (read agents: audited Safe forms; orchestrator: no general bash). Normal/dangerous commands require write permission and read-only filesystem isolation; dangerous invocations require exact per-call user approval. Project shell writes/builders remain blocked pending Phase 4. Arbitrary extension/MCP tools without a capability policy remain blocked. Only the user changes Agent or approves a plan.`;
 	});
 
 	pi.registerTool({
@@ -466,6 +496,7 @@ export default function agentsExtension(pi: ExtensionAPI) {
 		parameters,
 		async execute(_id, params, signal, onUpdate, ctx) {
 			if (configuring) throw new Error("Finish agent setup before delegating.");
+			if (workflow.isChecking()) throw new Error("Wait for stable-source verification before delegating.");
 			const parentProfile = active;
 			const controller = new AbortController();
 			const abort = () => controller.abort(signal?.reason);

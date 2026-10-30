@@ -17,6 +17,16 @@ import type { SourceInfo } from "../../core/source-info.ts";
 // RPC Commands (stdin)
 // ============================================================================
 
+/** First record on the private parent pipe; tokens are never passed through argv, environment, or responses. */
+export interface RpcAuthenticateCommand {
+	id?: string;
+	type: "authenticate";
+	token: string;
+}
+
+/** Every command and dialog response after bootstrap must carry the per-process client token. */
+export type RpcAuthenticatedRecord = (RpcCommand | RpcExtensionUIResponse) & { authToken: string };
+
 export type RpcCommand =
 	// Prompting
 	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
@@ -114,6 +124,7 @@ export interface RpcSessionState {
 
 // Success responses with data
 export type RpcResponse =
+	| { id?: string; type: "response"; command: "authenticate"; success: true }
 	// Prompting
 	| { id?: string; type: "response"; command: "prompt"; success: true; data: { disposition: PromptDisposition } }
 	| { id?: string; type: "response"; command: "steer"; success: true; data: { disposition: QueuedInputDisposition } }

@@ -167,6 +167,94 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("shortcut conflicts", () => {
+		it.each([["alt+a"], ["alt+shift+a", "alt+shift+b"]])(
+			"does not treat extension-implemented profile cycling as a core shortcut (%s)",
+			async (...keys) => {
+				const runtime = createExtensionRuntime();
+				const extension = await loadExtensionFromFactory(
+					(pi) => {
+						for (const key of keys) pi.registerShortcut(key as KeyId, { handler: async () => {} });
+					},
+					tempDir,
+					createEventBus(),
+					runtime,
+					"builtin:tark-agents",
+				);
+				const runner = new ExtensionRunner([extension], runtime, tempDir, sessionManager, modelRegistry);
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+				try {
+					const shortcuts = runner.getShortcuts({
+						...defaultKeybindings,
+						"app.profile.cycle": keys as KeyId[],
+					});
+
+					expect([...shortcuts.keys()]).toEqual(keys);
+					expect(runner.getShortcutDiagnostics()).toEqual([]);
+					expect(warnSpy).not.toHaveBeenCalled();
+				} finally {
+					warnSpy.mockRestore();
+				}
+			},
+		);
+
+		it.each([
+			["app.interrupt", false],
+			["app.clipboard.pasteImage", true],
+		] as const)("preserves conflicts when profile cycling shares a key with %s", async (action, allowed) => {
+			const runtime = createExtensionRuntime();
+			const extension = await loadExtensionFromFactory(
+				(pi) => pi.registerShortcut("alt+a", { handler: async () => {} }),
+				tempDir,
+				createEventBus(),
+				runtime,
+				"builtin:tark-agents",
+			);
+			const runner = new ExtensionRunner([extension], runtime, tempDir, sessionManager, modelRegistry);
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				// Profile cycling must not hide a core action in either iteration order.
+				for (const bindings of [
+					{ [action]: "alt+a" as KeyId, "app.profile.cycle": "alt+a" as KeyId },
+					{ "app.profile.cycle": "alt+a" as KeyId, [action]: "alt+a" as KeyId },
+				]) {
+					expect(runner.getShortcuts(bindings).has("alt+a")).toBe(allowed);
+					expect(runner.getShortcutDiagnostics()).toHaveLength(1);
+					expect(runner.getShortcutDiagnostics()[0].message).toContain(
+						allowed ? `built-in shortcut for ${action}` : "conflicts with built-in shortcut. Skipping.",
+					);
+				}
+			} finally {
+				warnSpy.mockRestore();
+			}
+		});
+
+		it("still warns when another extension registers the profile cycling key", async () => {
+			const runtime = createExtensionRuntime();
+			const extensions = [];
+			for (const extensionPath of ["builtin:tark-agents", "other-extension"]) {
+				extensions.push(
+					await loadExtensionFromFactory(
+						(pi) => pi.registerShortcut("alt+a", { handler: async () => {} }),
+						tempDir,
+						createEventBus(),
+						runtime,
+						extensionPath,
+					),
+				);
+			}
+			const runner = new ExtensionRunner(extensions, runtime, tempDir, sessionManager, modelRegistry);
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				expect(runner.getShortcuts(defaultKeybindings).get("alt+a")?.extensionPath).toBe("other-extension");
+				expect(runner.getShortcutDiagnostics()).toMatchObject([
+					{ message: expect.stringContaining("registered by both builtin:tark-agents and other-extension") },
+				]);
+				expect(warnSpy).toHaveBeenCalledTimes(1);
+			} finally {
+				warnSpy.mockRestore();
+			}
+		});
+
 		it("warns when extension shortcut conflicts with built-in", async () => {
 			const extCode = `
 				export default function(pi) {

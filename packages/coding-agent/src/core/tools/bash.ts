@@ -5,6 +5,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { spawn } from "child_process";
 import { type Static, Type } from "typebox";
 import { waitForChildProcess } from "../../utils/child-process.ts";
+import { withoutRpcEnvironment } from "../../utils/rpc-environment.ts";
 import {
 	getShellConfig,
 	getShellEnv,
@@ -112,7 +113,7 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
 				cwd,
 				detached: process.platform !== "win32",
-				env: env ?? getShellEnv(),
+				env: withoutRpcEnvironment(env ?? getShellEnv()),
 				stdio: [commandFromStdin ? "pipe" : "ignore", "pipe", "pipe"],
 				windowsHide: true,
 			});

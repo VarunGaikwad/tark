@@ -5,15 +5,24 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
+import { withoutRpcEnvironment } from "../../utils/rpc-environment.ts";
 import type { JsonAgentSessionEvent } from "../json-event.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
-import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
+import type {
+	RpcAuthenticateCommand,
+	RpcCommand,
+	RpcExtensionUIResponse,
+	RpcResponse,
+	RpcSessionState,
+	RpcSlashCommand,
+} from "./rpc-types.ts";
 
 // ============================================================================
 // Types
@@ -63,6 +72,7 @@ export class RpcClient {
 	private stderr = "";
 	private exitError: Error | null = null;
 	private options: RpcClientOptions;
+	private authToken: string | undefined;
 
 	constructor(options: RpcClientOptions = {}) {
 		this.options = options;
@@ -77,6 +87,7 @@ export class RpcClient {
 		}
 
 		this.exitError = null;
+		this.authToken = randomBytes(32).toString("hex");
 
 		const cliPath = this.options.cliPath ?? "dist/cli.js";
 		const args = ["--mode", "rpc"];
@@ -91,9 +102,9 @@ export class RpcClient {
 			args.push(...this.options.args);
 		}
 
-		const childProcess = spawn("node", [cliPath, ...args], {
+		const childProcess = spawn(process.execPath, [cliPath, ...args], {
 			cwd: this.options.cwd,
-			env: { ...process.env, ...this.options.env },
+			env: withoutRpcEnvironment({ ...process.env, ...this.options.env }),
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.process = childProcess;
@@ -137,6 +148,8 @@ export class RpcClient {
 			this.exitError = error;
 			throw error;
 		}
+		const authenticated = await this.send({ type: "authenticate", token: this.authToken });
+		if (!authenticated.success) throw new Error(authenticated.error);
 	}
 
 	/**
@@ -163,6 +176,7 @@ export class RpcClient {
 		});
 
 		this.process = null;
+		this.authToken = undefined;
 		this.pendingRequests.clear();
 	}
 
@@ -553,7 +567,13 @@ export class RpcClient {
 		this.pendingRequests.clear();
 	}
 
-	private async send(command: RpcCommandBody): Promise<RpcResponse> {
+	/** Respond to an extension dialog without exposing its authentication token to event listeners. */
+	respondToExtensionUI(response: RpcExtensionUIResponse): void {
+		if (!this.process?.stdin?.writable || !this.authToken) throw new Error("Client not started");
+		this.process.stdin.write(serializeJsonLine({ ...response, authToken: this.authToken }));
+	}
+
+	private async send(command: RpcCommandBody | RpcAuthenticateCommand): Promise<RpcResponse> {
 		const childProcess = this.process;
 		const stdin = childProcess?.stdin;
 		if (!childProcess || !stdin) {
@@ -574,7 +594,7 @@ export class RpcClient {
 		}
 
 		const id = `req_${++this.requestId}`;
-		const fullCommand = { ...command, id } as RpcCommand;
+		const fullCommand = { ...command, id, ...(command.type === "authenticate" ? {} : { authToken: this.authToken }) };
 
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {

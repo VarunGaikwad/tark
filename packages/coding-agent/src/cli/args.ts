@@ -290,7 +290,7 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} install <source> [-l]     Install extension source and add to settings
   ${APP_NAME} remove <source> [-l]      Remove extension source from settings
   ${APP_NAME} uninstall <source> [-l]   Alias for remove
-  ${APP_NAME} update [source|self|pi]   Update pi, extensions, or model catalogs
+  ${APP_NAME} update [source|self|pi]   Update ${APP_NAME}, extensions, or model catalogs
   ${APP_NAME} list                      List installed extensions from settings
   ${APP_NAME} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
   ${APP_NAME} auth <command>            Print credentials or check provider readiness
@@ -412,7 +412,7 @@ ${chalk.bold("Examples:")}
   ${APP_NAME} --exclude-tools ask_question
 
   # Export a session file to HTML
-  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/agent/sessions/--path--/session.jsonl
+  ${APP_NAME} --export ~/${CONFIG_DIR_NAME}/sessions/--path--/session.jsonl
   ${APP_NAME} --export session.jsonl output.html
 
 ${chalk.bold("Environment Variables:")}
@@ -459,7 +459,7 @@ ${chalk.bold("Environment Variables:")}
   AWS_SECRET_ACCESS_KEY            - AWS secret key for Amazon Bedrock
   AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
   AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
-  ${ENV_AGENT_DIR.padEnd(32)} - Config directory (default: ~/${CONFIG_DIR_NAME}/agent)
+  ${ENV_AGENT_DIR.padEnd(32)} - Config directory (default: ~/${CONFIG_DIR_NAME})
   ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
   PI_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
   PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes

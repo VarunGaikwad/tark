@@ -19,6 +19,37 @@ Normal CLI options still select the working folder, model, tools, resources, and
 
 RPC mode rejects `@file` prompt arguments. Send prompts through the [`prompt`](rpc-commands.md#prompt) command instead.
 
+## Client authentication
+
+The only RPC transport is the private stdin/stdout pipe inherited from the parent;
+there is no listening TCP endpoint or Unix/Windows RPC socket. Before any command,
+the parent generates a fresh 256-bit random token and pins it with the first record:
+
+```json
+{"id":"auth-1","type":"authenticate","token":"<64 lowercase hexadecimal characters>"}
+```
+
+The server acknowledges `command: "authenticate", success: true` without echoing
+the token. Every subsequent command **and** `extension_ui_response` must carry
+`"authToken": "<same token>"`. Missing/wrong tokens and attempts to replace the
+pinned client fail before commands, user-input provenance, or dialogs are handled.
+A new RPC process needs a new bootstrap/token; session changes within that process
+do not create a new client. `RpcClient.start()` handles this automatically, and
+`RpcClient.respondToExtensionUI()` authenticates dialog replies.
+
+Bootstrap trusts the parent's inherited stdin capability, not an unauthenticated
+public listener. Do not expose this stream through a network bridge without a
+separate authenticated transport. Spawned tools do not run before an authenticated
+command can request them. Normal tool/check/job/delegated-process launches do not
+forward the parent's RPC stdin or additional descriptors. Tokens are held only in
+client/server memory: never pass them through argv, environment, session entries,
+responses, or logs. Spawn boundaries remove reserved RPC/IPC and channel-discovery
+environment variables, including caller-supplied overrides. This is not a defense
+against a privileged debugger or arbitrary same-user process-memory inspection.
+
+The command examples below show command bodies; on the wire, add `authToken` after
+bootstrap. This is a required protocol change, not an optional legacy mode.
+
 ## Protocol records
 
 The protocol has four record families:
@@ -37,7 +68,7 @@ See [RPC Commands](rpc-commands.md), [JSON Event Stream](json.md), and [RPC Exte
 Every command accepts an optional string `id`. A matching response repeats it:
 
 ```json
-{"id":"req-1","type":"get_state"}
+{"id":"req-1","type":"get_state","authToken":"<client token>"}
 {"id":"req-1","type":"response","command":"get_state","success":true,"data":{"...":"..."}}
 ```
 
@@ -81,7 +112,7 @@ A failed command returns one response with `success: false`:
 Malformed JSON produces a parse response without a request ID:
 
 ```json
-{"type":"response","command":"parse","success":false,"error":"Failed to parse command: Unexpected token..."}
+{"type":"response","command":"parse","success":false,"error":"Invalid RPC JSON record"}
 ```
 
 A success response only covers command handling. Provider failures and aborts after a prompt is accepted appear in the message and event stream.
@@ -100,6 +131,7 @@ This Python example uses a binary pipe reader, which splits on LF without treati
 
 ```python
 import json
+import secrets
 import subprocess
 
 process = subprocess.Popen(
@@ -111,7 +143,17 @@ process = subprocess.Popen(
 assert process.stdin is not None
 assert process.stdout is not None
 
-command = {"id": "prompt-1", "type": "prompt", "message": "Hello"}
+token = secrets.token_hex(32)
+process.stdin.write(json.dumps({"id": "auth-1", "type": "authenticate", "token": token}).encode("utf-8") + b"\n")
+process.stdin.flush()
+while line := process.stdout.readline():
+    record = json.loads(line)
+    if record.get("id") == "auth-1" and record.get("type") == "response":
+        if not record.get("success"):
+            raise RuntimeError("RPC authentication failed")
+        break
+
+command = {"id": "prompt-1", "type": "prompt", "message": "Hello", "authToken": token}
 process.stdin.write(json.dumps(command).encode("utf-8") + b"\n")
 process.stdin.flush()
 

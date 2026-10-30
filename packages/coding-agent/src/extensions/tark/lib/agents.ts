@@ -17,8 +17,8 @@ export { type AgentConfig, type AgentName, agentNames, type Effort, effortLevels
 export const profiles: Record<AgentName, string> = {
 	plan: "Explore the request and relevant code, clarify important unknowns, and return an actionable plan with acceptance checks. Do not implement or delegate implementation. Stop after the plan.",
 	orchestrator:
-		"Break work into focused tasks; use ask with purpose: explore for read-only codebase exploration, plan for planning, and debug with mode: read for diagnosis. Use orchestrator children only for a distinct coordination task, not ordinary fan-out. Include all necessary context; children do not inherit the conversation. Orchestrator is always read-only and never repairs source itself. Builder requests require task_id and explicit paths exactly matching the user-approved plan task; scope changes require new user approval. Phase 1 blocks builders until sandboxed checks and builder isolation exist, and blocks shell/check execution. Do not claim checks ran. At most two read-only jobs can run concurrently; no parallel builders. Inspect results and report verification blockers. Do not delegate the same orchestration task recursively.",
-	debug: "Reproduce or establish evidence for the failure, trace its cause before editing, and make the smallest justified fix. Verify with a regression check. Separate confirmed facts from hypotheses and report any unexecuted checks.",
+		"Break work into focused tasks; use ask with purpose: explore for read-only codebase exploration, plan for planning, and debug with mode: read for diagnosis. Use orchestrator children only for a distinct coordination task, not ordinary fan-out. Include all necessary context; children do not inherit the conversation. Orchestrator is always read-only and never repairs source itself. Builder requests require task_id and explicit paths exactly matching the user-approved plan task; scope changes require new user approval. Builders remain blocked until Phase 4 isolation. Run verification through run_checks; no general bash. Do not claim unexecuted checks ran. At most two read-only jobs can run concurrently; no parallel builders. Inspect results and report verification blockers. Do not delegate the same orchestration task recursively.",
+	debug: "First reproduce or establish concrete evidence and record it with debug_workflow. Add a failing regression and run it through run_checks before fixing source, or record why regression testing is infeasible together with alternative evidence and verification. Make the smallest justified fix, run regression/relevant verification, and report results. If reproduction is unavailable, stop and report the blocker. Separate confirmed facts from hypotheses; disclose missing checks and never claim coverage that did not occur.",
 	ask: "Answer the user's question using relevant code or documentation as evidence. Do not change files or delegate changes. When context is missing, ask rather than invent facts. Stop when the question is answered.",
 	code: "Implement the requested scope using existing repository patterns. Preserve unrelated changes, add focused coverage for behavior changes, run relevant checks, and report results. Stop when acceptance conditions are met.",
 };
@@ -294,7 +294,9 @@ export function routeSubagent(
 export function subagentTools(agent: AgentName, active: string[], depth: number, exploration = false): string[] {
 	if (agent === "plan" || agent === "ask") {
 		return active.filter(
-			(name) => ["read", "grep", "find", "ls"].includes(name) || (!exploration && depth < 2 && name === "subagent"),
+			(name) =>
+				["read", "grep", "find", "ls", "bash", "run_checks"].includes(name) ||
+				(!exploration && depth < 2 && name === "subagent"),
 		);
 	}
 	return active.filter((name) => name !== "askquestions" && (name !== "subagent" || depth < 2));

@@ -171,6 +171,13 @@ Set the text in the input editor. Fire-and-forget.
 
 ## Responses to Pi
 
+Authenticate the client first using [private-stdin bootstrap](rpc.md#client-authentication).
+Every dialog response must include that client's `authToken`; the server checks it
+before resolving any pending dialog. A process that knows the dialog ID but lacks
+the client token cannot approve a plan or dangerous invocation. `RpcClient` users
+can call `respondToExtensionUI(response)` without handling the token themselves.
+The examples below omit the shared `authToken` field for readability.
+
 Responses are sent for dialog methods only (`select`, `confirm`, `input`, `editor`). The `id` must match the request.
 
 ### Value response (select, input, editor)
