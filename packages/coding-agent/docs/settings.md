@@ -4,6 +4,89 @@ This reference lists user-configurable settings, their types, defaults, and purp
 
 Add `"$schema": "https://pi.dev/schemas/settings.schema.json"` to `settings.json` for editor validation and completion.
 
+## Tark profiles, setup, and sound
+
+Tark stores built-in feature preferences under `tark` in `~/.tark/settings.json`
+(or `$TARK_CODING_AGENT_DIR/settings.json`) and trusted `.tark/settings.json`.
+Use the bundled [`settings.schema.json`](../schemas/settings.schema.json) for Tark
+editor completion; the published upstream schema may not include these fields.
+All fields are optional. The agent loader ignores unknown top-level Tark keys;
+the editor schema flags them. Invalid supported values and unknown profile keys
+are rejected by their loaders rather than silently changing behavior.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `tark.model` | string | Current model | Main model, as exact `provider/model-id`. |
+| `tark.small_model` | string | None | Cheaper model for eligible small tasks and read-only exploration; exploration falls back to the current model. |
+| `tark.subagent_model` | string | Current model | Default delegated model, as exact `provider/model-id`. |
+| `tark.auto_profile` | boolean | `false` | Ignored for routing: only direct user input changes Agent. |
+| `tark.subagent_variant_overrides.<profile>.model` | string | Delegation routing | Exact model for `plan`, `orchestrator`, `debug`, `ask`, or `code`. |
+| `tark.subagent_variant_overrides.<profile>.effort` | thinking level | Current effort | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Eligible small tasks otherwise use `low`. |
+| `tark.recommendedTools` | `"enabled" \| "disabled"` | Unset | Project-only saved recommended-tool setup choice. |
+| `tark.agentSetup` | `"enabled" \| "disabled"` | Unset | Project-only saved agent-setup choice. |
+
+Read-only exploration is a core feature: use `subagent` with `agent: "ask"` and
+`purpose: "explore"`; no setup is required. Exploration uses `small_model` when
+configured, otherwise the current model, with low effort regardless of profile
+model/effort overrides. Children receive active read tools (`read`, `grep`, `find`, `ls`), validated Safe
+`bash`, and fixed `run_checks`, without source-write, MCP, or further delegation
+tools. Check execution still requires explicit command trust and platform consent;
+non-interactive children cannot obtain missing consent. Other
+read-only children can delegate exploration within the depth limit of 2.
+
+Project values override user values. Profile model/effort fields merge individually;
+lists replace inherited lists. Untrusted project settings are
+not read. `/setup-agents` opens a terminal menu: choose a profile, search available
+authenticated models, then select one to save only its `.model` override in trusted
+`.tark/settings.json`. Existing effort and unrelated settings are preserved; Escape
+at either step cancels without writing. No model call is made. Setup requires an
+idle session with no running or queued subagents. `/profile <name>` applies the
+saved model to the current session; future subagents use it automatically.
+
+`/setup-agents defaults` fills missing project values without replacing existing
+settings or setup choices and also works without a terminal menu. Its scaffold uses the selected model and initializes
+profile efforts to `high` for plan/orchestrator/debug, `low` for ask, and `medium`
+for code. Recommended-tool setup remains opt-in and writes `defaultTools` in the
+same project settings file.
+
+See [Agent permissions and fixed checks](../tark/docs/permissions.md) for command
+tiers, `.tark/checks.json`, sandbox requirements, timeout bounds, and debug evidence.
+
+### Sound
+
+Sound is a **user-level preference only**. Project settings cannot enable or
+override it, even in a trusted project. `/sound` and the startup opt-in prompt
+read/write `tark.sound` in the user settings file, preserving other settings.
+Existing settings without `tark.sound` still receive the opt-in prompt in an
+interactive terminal. A saved sound object, including `{ "enabled": false }`,
+suppresses that prompt. JSON, print, RPC, and delegated runs remain silent.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `tark.sound.enabled` | boolean | `false` | Enable sound notifications. |
+| `tark.sound.events.attention` | boolean | `true` | Play when the active operation needs user input. |
+| `tark.sound.events.finished` | boolean | `true` | Play after final settlement, not individual tools or retries. |
+| `tark.sound.events.failure` | boolean | `true` | Play for an unrecovered failure. |
+| `tark.sound.minimumDurationMs` | number | `5000` | Minimum completion duration, from 0 to 3600000 milliseconds. |
+
+Supply `attention.wav`, `finished.wav`, and `failure.wav` in `~/.tark/sounds/`.
+An OS audio player is required; `/sound test` verifies playback. For example,
+in user settings:
+
+```json
+{
+  "tark": {
+    "auto_profile": true,
+    "sound": { "enabled": true, "events": { "failure": false } }
+  }
+}
+```
+
+Separate `agent.json`, `agents.json`, and `tark-sound.json` files are no longer
+read. Move agent fields under `tark`, and move the old sound object's `enabled`,
+`events`, and `minimumDurationMs` fields under `tark.sound` in user settings.
+There is no automatic old-file migration or fallback. Reload after manual edits.
+
 ## Model and thinking
 
 <a id="model-cycling"></a>

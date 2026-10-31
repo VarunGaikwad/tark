@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from "f
 import { createRequire } from "module";
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
 import { stripBom } from "./utils/text.ts";
@@ -475,6 +475,25 @@ export function getDocsPath(): string {
 	return resolve(join(getPackageDir(), "docs"));
 }
 
+/** Get Tark's bundled skills, prompts, themes, and notices. */
+export function getTarkResourcesDir(): string {
+	return join(getPackageDir(), "tark");
+}
+
+/** Resolve delegation through this installation, never an unrelated executable on PATH. */
+export function getTarkInvocation(): { command: string; args: string[] } {
+	if (isBunBinary) return { command: process.execPath, args: [] };
+	const root = getPackageDir();
+	const source = join(root, "src", "cli.ts");
+	if (existsSync(source)) {
+		return {
+			command: process.execPath,
+			args: ["--import", pathToFileURL(join(root, "src", "experimental", "source-resolver.ts")).href, source],
+		};
+	}
+	return { command: process.execPath, args: [join(root, "dist", "bundle", "cli.js")] };
+}
+
 /** Get path to examples directory */
 export function getExamplesPath(): string {
 	return resolve(join(getPackageDir(), "examples"));
@@ -623,16 +642,16 @@ export function getShareViewerUrl(gistId: string): string {
 }
 
 // =============================================================================
-// User Config Paths (~/.pi/agent/*)
+// User Config Paths (~/.tark/*)
 // =============================================================================
 
-/** Get the agent config directory (e.g., ~/.pi/agent/) */
+/** Get the user configuration directory (default: ~/.tark/). */
 export function getAgentDir(): string {
 	const envDir = process.env[ENV_AGENT_DIR];
 	if (envDir) {
 		return expandTildePath(envDir);
 	}
-	return join(homedir(), CONFIG_DIR_NAME, "agent");
+	return join(homedir(), CONFIG_DIR_NAME);
 }
 
 /** Get path to user's custom themes directory */

@@ -648,6 +648,167 @@
         }
       }
     },
+    "tark": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "pattern": "^[^\\s/]+/\\S+$",
+          "description": "Exact provider/model-id, not a model pattern."
+        },
+        "small_model": {
+          "type": "string",
+          "pattern": "^[^\\s/]+/\\S+$",
+          "description": "Exact provider/model-id, not a model pattern."
+        },
+        "subagent_model": {
+          "type": "string",
+          "pattern": "^[^\\s/]+/\\S+$",
+          "description": "Exact provider/model-id, not a model pattern."
+        },
+        "auto_profile": {
+          "type": "boolean",
+          "default": false
+        },
+        "subagent_variant_overrides": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "^[^\\s/]+/\\S+$",
+                  "description": "Exact provider/model-id, not a model pattern."
+                },
+                "effort": {
+                  "$ref": "#/$defs/ModelThinkingLevel"
+                }
+              },
+              "additionalProperties": false
+            },
+            "orchestrator": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "^[^\\s/]+/\\S+$",
+                  "description": "Exact provider/model-id, not a model pattern."
+                },
+                "effort": {
+                  "$ref": "#/$defs/ModelThinkingLevel"
+                }
+              },
+              "additionalProperties": false
+            },
+            "debug": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "^[^\\s/]+/\\S+$",
+                  "description": "Exact provider/model-id, not a model pattern."
+                },
+                "effort": {
+                  "$ref": "#/$defs/ModelThinkingLevel"
+                }
+              },
+              "additionalProperties": false
+            },
+            "ask": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "^[^\\s/]+/\\S+$",
+                  "description": "Exact provider/model-id, not a model pattern."
+                },
+                "effort": {
+                  "$ref": "#/$defs/ModelThinkingLevel"
+                }
+              },
+              "additionalProperties": false
+            },
+            "code": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "pattern": "^[^\\s/]+/\\S+$",
+                  "description": "Exact provider/model-id, not a model pattern."
+                },
+                "effort": {
+                  "$ref": "#/$defs/ModelThinkingLevel"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "recommendedTools": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "enabled"
+            },
+            {
+              "type": "string",
+              "const": "disabled"
+            }
+          ],
+          "description": "Project-only saved startup setup choice."
+        },
+        "agentSetup": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "enabled"
+            },
+            {
+              "type": "string",
+              "const": "disabled"
+            }
+          ],
+          "description": "Project-only saved startup setup choice."
+        },
+        "sound": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "events": {
+              "type": "object",
+              "properties": {
+                "attention": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "finished": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "failure": {
+                  "type": "boolean",
+                  "default": true
+                }
+              }
+            },
+            "minimumDurationMs": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3600000,
+              "default": 5000
+            }
+          },
+          "description": "User-level sound preferences only. Project settings cannot enable or override sound."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Built-in Tark profiles, delegation, setup, and sound settings."
+    },
     "sessionDir": {
       "type": "string",
       "description": "Custom session storage directory, in the same format as the --session-dir CLI flag."

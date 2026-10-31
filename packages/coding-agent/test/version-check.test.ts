@@ -4,7 +4,6 @@ import {
 	comparePackageVersions,
 	formatVersionCheckError,
 	getLatestPiRelease,
-	getLatestPiVersion,
 	isNewerPackageVersion,
 } from "../src/utils/version-check.ts";
 import { allowNetwork } from "./test-network-env.ts";
@@ -46,7 +45,7 @@ describe("version checks", () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
+		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ version: "1.2.4" });
 		expect(fetchMock).toHaveBeenCalledWith(
 			"https://pi.dev/api/latest-version",
 			expect.objectContaining({
@@ -125,7 +124,7 @@ describe("version checks", () => {
 		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
+		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ version: "1.2.4" });
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 });

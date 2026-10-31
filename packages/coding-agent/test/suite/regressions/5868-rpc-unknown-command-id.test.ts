@@ -94,7 +94,9 @@ describe("RPC unknown command responses (#5868)", () => {
 			void runRpcMode(createRuntimeHost(harness));
 			await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
 
-			rpcIo.lineHandler?.(JSON.stringify({ id: "test", type: "foobar" }));
+			const token = "a".repeat(64);
+			rpcIo.lineHandler?.(JSON.stringify({ type: "authenticate", token }));
+			rpcIo.lineHandler?.(JSON.stringify({ id: "test", type: "foobar", authToken: token }));
 
 			await vi.waitFor(() => {
 				expect(parseOutputLines()).toContainEqual({

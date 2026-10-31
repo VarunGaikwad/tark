@@ -1,0 +1,9 @@
+Ponytail
+Copyright (c) 2026 DietrichGebert
+
+Source: https://github.com/dietrichgebert/ponytail
+Commit: 9cc65d03aa2da1db7121b912d03596409ee340b8
+License: MIT (see LICENSE).
+
+The core SKILL.md is bundled unchanged. Companion skills, hooks, and runtime
+extensions are not bundled. In Pi, explicitly invoke it with /skill:ponytail.

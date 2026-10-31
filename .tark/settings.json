@@ -1,0 +1,41 @@
+{
+  "quietStartup": true,
+  "defaultTools": [
+    "+grep",
+    "+find",
+    "+ls"
+  ],
+  "tark": {
+    "model": "openai-codex/gpt-6.1-sol",
+    "small_model": "openai-codex/gpt-6-luna",
+    "subagent_model": "openai-codex/gpt-6.1-sol",
+    "delegate_exploration": true,
+    "auto_profile": true,
+    "codeHealth": {
+      "enabled": true
+    },
+    "subagent_variant_overrides": {
+      "plan": {
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "high"
+      },
+      "orchestrator": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "high"
+      },
+      "debug": {
+        "model": "openai-codex/gpt-6-astra",
+        "effort": "high"
+      },
+      "ask": {
+        "model": "openai-codex/gpt-6-luna",
+        "effort": "low"
+      },
+      "code": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "effort": "high"
+      }
+    },
+    "agentSetup": "enabled"
+  }
+}

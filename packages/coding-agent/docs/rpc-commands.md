@@ -2,6 +2,11 @@
 
 This reference lists commands accepted on stdin in [RPC mode](rpc.md). Each command and response is one JSON object. Shared message values use the [message types](message-types.md).
 
+Authenticate first as described in [RPC client authentication](rpc.md#client-authentication).
+Examples here show command bodies: every wire command must additionally include
+`authToken` from that process's private-stdin bootstrap. Unauthenticated commands
+are rejected before execution or approval input handling.
+
 ## Prompting
 
 ### prompt

@@ -1,0 +1,10 @@
+agent-browser
+Copyright 2025 Vercel Inc.
+
+Source: https://github.com/vercel-labs/agent-browser
+Commit: 5ee8691339a5a002e4d7454eec95250253bc7419
+License: Apache-2.0 (see LICENSE).
+
+The upstream skills/agent-browser/SKILL.md discovery stub is bundled unchanged.
+The agent-browser CLI and browser binaries are not bundled or installed by Piexis.
+Install them separately before use, then invoke /skill:agent-browser in Pi.

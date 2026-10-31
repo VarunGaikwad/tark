@@ -15,6 +15,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
@@ -262,6 +263,8 @@ async function main() {
 		{ stdio: ["pipe", "pipe", "pipe"] },
 	);
 
+	const authToken = randomBytes(32).toString("hex");
+	agent.stdin.write(`${JSON.stringify({ type: "authenticate", token: authToken })}\n`);
 	let stderr = "";
 	agent.stderr?.on("data", (data: Buffer) => {
 		stderr += data.toString();
@@ -292,7 +295,7 @@ async function main() {
 	// -- Agent communication --
 
 	function send(obj: Record<string, unknown>): void {
-		agent.stdin!.write(`${JSON.stringify(obj)}\n`);
+		agent.stdin!.write(`${JSON.stringify({ ...obj, authToken })}\n`);
 	}
 
 	let isStreaming = false;

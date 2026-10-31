@@ -23,6 +23,10 @@ export function useWindowsKeybindings(
 const windowsKeybindings = useWindowsKeybindings();
 
 const APP_KEYBINDINGS = {
+	"app.profile.cycle": { defaultKeys: "alt+a", description: "Cycle Tark agent profile" },
+	"app.question.toggle": { defaultKeys: "space", description: "Toggle question choice" },
+	"app.question.next": { defaultKeys: "tab", description: "Next question" },
+	"app.question.previous": { defaultKeys: "shift+tab", description: "Previous question" },
 	"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },

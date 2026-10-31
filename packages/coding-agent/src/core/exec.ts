@@ -6,6 +6,7 @@ import { constants as bufferConstants } from "node:buffer";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { waitForChildProcess } from "../utils/child-process.ts";
+import { withoutRpcEnvironment } from "../utils/rpc-environment.ts";
 
 const DEFAULT_EXEC_MAX_BUFFER = Math.min(256 * 1024 * 1024, bufferConstants.MAX_STRING_LENGTH);
 const FORCE_KILL_DELAY_MS = 5000;
@@ -59,6 +60,7 @@ export async function execCommand(
 		cwd,
 		shell: false,
 		stdio: ["ignore", "pipe", "pipe"],
+		env: withoutRpcEnvironment(),
 	});
 
 	let stdout = "";

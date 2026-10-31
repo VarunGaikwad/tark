@@ -104,11 +104,13 @@ async function startRpcHarness(extension: (pi: ExtensionAPI) => void): Promise<{
 		throw error;
 	}
 
+	const token = "a".repeat(64);
+	rpcIo.lineHandler!(JSON.stringify({ type: "authenticate", token }));
 	return {
 		harness,
 		send(command) {
 			if (!rpcIo.lineHandler) throw new Error("RPC line handler is not attached");
-			rpcIo.lineHandler(JSON.stringify(command));
+			rpcIo.lineHandler(JSON.stringify({ ...command, authToken: token }));
 		},
 		cleanup,
 	};

@@ -168,6 +168,62 @@ const CodemodeSettingsSchema = Type.Object({
 	),
 });
 
+const TarkModelSchema = Type.String({
+	pattern: "^[^\\s/]+/\\S+$",
+	description: "Exact provider/model-id, not a model pattern.",
+});
+const TarkProfileOverrideSchema = Type.Object(
+	{
+		model: Type.Optional(TarkModelSchema),
+		effort: Type.Optional(ModelThinkingLevelSchema),
+	},
+	{ additionalProperties: false },
+);
+const TarkSetupChoiceSchema = Type.Union([Type.Literal("enabled"), Type.Literal("disabled")], {
+	description: "Project-only saved startup setup choice.",
+});
+const TarkSoundSchema = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ default: false })),
+		events: Type.Optional(
+			Type.Object({
+				attention: Type.Optional(Type.Boolean({ default: true })),
+				finished: Type.Optional(Type.Boolean({ default: true })),
+				failure: Type.Optional(Type.Boolean({ default: true })),
+			}),
+		),
+		minimumDurationMs: Type.Optional(Type.Number({ minimum: 0, maximum: 3_600_000, default: 5000 })),
+	},
+	{ description: "User-level sound preferences only. Project settings cannot enable or override sound." },
+);
+const TarkSettingsSchema = Type.Object(
+	{
+		model: Type.Optional(TarkModelSchema),
+		small_model: Type.Optional(TarkModelSchema),
+		subagent_model: Type.Optional(TarkModelSchema),
+		auto_profile: Type.Optional(Type.Boolean({ default: false })),
+		subagent_variant_overrides: Type.Optional(
+			Type.Object(
+				{
+					plan: Type.Optional(TarkProfileOverrideSchema),
+					orchestrator: Type.Optional(TarkProfileOverrideSchema),
+					debug: Type.Optional(TarkProfileOverrideSchema),
+					ask: Type.Optional(TarkProfileOverrideSchema),
+					code: Type.Optional(TarkProfileOverrideSchema),
+				},
+				{ additionalProperties: false },
+			),
+		),
+		recommendedTools: Type.Optional(TarkSetupChoiceSchema),
+		agentSetup: Type.Optional(TarkSetupChoiceSchema),
+		sound: Type.Optional(TarkSoundSchema),
+	},
+	{
+		additionalProperties: false,
+		description: "Built-in Tark profiles, delegation, setup, and sound settings.",
+	},
+);
+
 const PackageSourceSchema = Type.Union(
 	[
 		Type.String({ description: "Load all resources from the package." }),
@@ -398,6 +454,7 @@ export const SettingsSchema = Type.Object(
 		markdown: Type.Optional(MarkdownSettingsSchema),
 		warnings: Type.Optional(WarningSettingsSchema),
 		codemode: Type.Optional(CodemodeSettingsSchema),
+		tark: Type.Optional(TarkSettingsSchema),
 		sessionDir: Type.Optional(
 			Type.String({
 				description: "Custom session storage directory, in the same format as the --session-dir CLI flag.",

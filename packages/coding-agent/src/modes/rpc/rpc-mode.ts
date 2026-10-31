@@ -29,6 +29,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import { toJsonEvent } from "../json-event.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
+import { RpcAuthenticator } from "./rpc-auth.ts";
 import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
@@ -54,6 +55,7 @@ export type {
 export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<never> {
 	takeOverStdout();
 	let session = runtimeHost.session;
+	const authentication = new RpcAuthenticator();
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
 
@@ -751,17 +753,24 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(line);
-		} catch (parseError: unknown) {
+		} catch {
+			// JSON parser diagnostics may quote credentials from the rejected wire record.
+			output(error(undefined, "parse", "Invalid RPC JSON record"));
+			await waitForRawStdoutBackpressure();
+			return;
+		}
+
+		const authorization = authentication.authorize(parsed);
+		if (authorization.kind !== "authorized") {
 			output(
-				error(
-					undefined,
-					"parse",
-					`Failed to parse command: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-				),
+				authorization.kind === "authenticated"
+					? { id: authorization.id, type: "response", command: "authenticate", success: true }
+					: error(authorization.id, "authenticate", "RPC authentication required or invalid"),
 			);
 			await waitForRawStdoutBackpressure();
 			return;
 		}
+		parsed = authorization.record;
 
 		// Handle extension UI responses
 		if (

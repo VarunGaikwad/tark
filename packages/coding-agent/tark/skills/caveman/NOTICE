@@ -1,0 +1,10 @@
+Caveman
+Copyright 2026 Julius Brussee
+
+Adapted from https://github.com/juliusbrussee/caveman
+Commit: 2e08b9177c07bb7249a8a2d1a6758e5db281d002
+License: Apache-2.0; upstream pre-3.0 MIT notice retained in LICENSE-MIT.
+
+Piexis changes: removed references to unbundled companion skills, mode aliases,
+and hooks; documented Pi's explicit skill command. Only the voice instructions
+are bundled, not the upstream runtime or its third-party software.

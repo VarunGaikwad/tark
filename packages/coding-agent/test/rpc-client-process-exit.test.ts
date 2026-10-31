@@ -24,10 +24,17 @@ describe("RpcClient child process failures", () => {
 	test("rejects an in-flight request when the child process exits", async () => {
 		const client = new RpcClient({
 			cliPath: writeChildScript(`
-process.stdin.once("data", () => {
-	process.exit(43);
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+	buffer += chunk;
+	while (buffer.includes('\\n')) {
+		const newline = buffer.indexOf('\\n');
+		const command = JSON.parse(buffer.slice(0, newline));
+		buffer = buffer.slice(newline + 1);
+		if (command.type === 'authenticate') console.log(JSON.stringify({id:command.id,type:'response',command:'authenticate',success:true}));
+		else process.exit(43);
+	}
 });
-process.stdin.resume();
 `),
 		});
 
