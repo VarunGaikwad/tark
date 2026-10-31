@@ -6,7 +6,7 @@ import { executeArgv } from "../src/extensions/tark/lib/command-execution.ts";
 import { subagentEnvironment } from "../src/extensions/tark/lib/subagent-runner.ts";
 import { spawnProcess, waitForChildProcess } from "../src/utils/child-process.ts";
 import { withoutRpcEnvironment } from "../src/utils/rpc-environment.ts";
-import { getShellEnv } from "../src/utils/shell.ts";
+import { getShellConfig, getShellEnv } from "../src/utils/shell.ts";
 
 const reserved = [
 	"TARK_RPC_TOKEN",
@@ -65,13 +65,18 @@ describe("RPC capability stripping at spawn boundaries", () => {
 	it("scrubs real bash launches after spawn-hook environment overrides", async () => {
 		seed();
 		const output: Buffer[] = [];
+		const shell = getShellConfig();
 		const executable = process.execPath.replaceAll("\\", "/");
 		const result = await createLocalBashOperations().exec(`"${executable}" -e '${probe}'`, process.cwd(), {
 			env: { ...process.env },
 			timeout: 10,
 			onData: (chunk) => output.push(chunk),
 		});
-		expect(result.exitCode).toBe(0);
-		expect(JSON.parse(Buffer.concat(output).toString())).toEqual([]);
+		const text = Buffer.concat(output).toString();
+		expect(
+			result.exitCode,
+			JSON.stringify({ shell, output: text.replaceAll("not-a-real-credential", "[redacted]").slice(-4096) }),
+		).toBe(0);
+		expect(JSON.parse(text)).toEqual([]);
 	});
 });
