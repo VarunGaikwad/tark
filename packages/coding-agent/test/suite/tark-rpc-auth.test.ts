@@ -1,7 +1,7 @@
 // Real RPC and attacker subprocesses prove that inherited-stdio injection cannot impersonate user approval.
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,6 +41,8 @@ async function start(cwd: string, host: string) {
 	const records: Record<string, unknown>[] = [];
 	let stdoutBytes = 0;
 	let stderrBytes = 0;
+	let stderrTail = "";
+	let initialPlanSaveFailure: string | undefined;
 	let writes = 0;
 	let completedWrites = 0;
 	let writeFailed = false;
@@ -49,6 +51,11 @@ async function start(cwd: string, host: string) {
 	});
 	child.stderr.on("data", (data: Buffer) => {
 		stderrBytes += data.length;
+		const excerpt = stderrTail + data.toString("utf8");
+		const failure = excerpt.match(/TARK_RPC_INITIAL_PLAN_SAVE_(?:PRIVATE_0700|FAILED)/);
+		if (failure) initialPlanSaveFailure = failure[0];
+		// Retain only enough overlap to recognize a label split across stderr chunks.
+		stderrTail = excerpt.slice(-64);
 	});
 	child.stdin.on("error", () => {
 		writeFailed = true;
@@ -71,6 +78,7 @@ async function start(cwd: string, host: string) {
 			writeFailed,
 			stdoutBytes,
 			stderrBytes,
+			initialPlanSaveFailure,
 			records: records.length,
 			recent: records.slice(-12).map((record) => ({
 				authenticate: record.command === "authenticate",
@@ -87,7 +95,7 @@ async function start(cwd: string, host: string) {
 		for (let attempt = 0; attempt < 500; attempt++) {
 			const found = records.find(match);
 			if (found) return found;
-			if (child.exitCode !== null || child.signalCode !== null || writeFailed) break;
+			if (child.exitCode !== null || child.signalCode !== null || writeFailed || initialPlanSaveFailure) break;
 			await new Promise((done) => setTimeout(done, 20));
 		}
 		throw new Error(`RPC fixture did not complete ${phase}: ${status()}`);
@@ -103,6 +111,19 @@ async function start(cwd: string, host: string) {
 }
 
 describe("spawned process cannot submit /approve-plan", () => {
+	it.each(["PRIVATE_0700", "FAILED"])("reports initial plan-save failure %s before RPC bootstrap", async (failure) => {
+		const { cwd, host } = project();
+		if (failure === "PRIVATE_0700") {
+			const workflows = join(host, "workflows");
+			mkdirSync(workflows, { recursive: true });
+			// A file fails the earlier repository check with ENOTDIR, not the private-directory check.
+			chmodSync(workflows, 0o755);
+		}
+		await expect(start(cwd, failure === "FAILED" ? cwd : host)).rejects.toThrow(
+			`"initialPlanSaveFailure":"TARK_RPC_INITIAL_PLAN_SAVE_${failure}"`,
+		);
+	});
+
 	it("rejects spawned prompt and dialog forgeries, but accepts the authenticated user's exact review", async () => {
 		const { root, cwd, host } = project();
 		const rpc = await start(cwd, host);
