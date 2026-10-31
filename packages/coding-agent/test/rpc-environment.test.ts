@@ -19,8 +19,9 @@ const reserved = [
 	"LISTEN_PID",
 	"LISTEN_FDNAMES",
 ];
+// Git Bash rewrites slash-delimited regex literals in native-process arguments as paths.
 const probe =
-	"process.stdout.write(JSON.stringify(Object.keys(process.env).filter(k=>/RPC|IPC|NODE_CHANNEL|LISTEN_/i.test(k))))";
+	'process.stdout.write(JSON.stringify(Object.keys(process.env).filter(k=>new RegExp("RPC|IPC|NODE_CHANNEL|LISTEN_","i").test(k))))';
 function seed() {
 	for (const name of reserved) vi.stubEnv(name, "not-a-real-credential");
 }

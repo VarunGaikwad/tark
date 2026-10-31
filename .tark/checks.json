@@ -1,0 +1,29 @@
+   {
+     "timeoutSeconds": 600,
+     "typecheck": {
+       "executable": "/home/preapexis/.nvm/versions/node/v24.22.1/bin/node",
+       "args": ["node_modules/typescript/bin/tsc", "--noEmit"]
+     },
+     "lint": {
+       "executable": "/home/preapexis/.nvm/versions/node/v24.22.1/bin/node",
+       "args": ["scripts/biome-check.mjs"]
+     },
+     "test": {
+       "executable": "/home/preapexis/.nvm/versions/node/v24.22.1/bin/node",
+       "args":  [
+     "node_modules/vitest/dist/cli.js",
+     "--root", "packages/coding-agent",
+     "--configLoader", "runner",
+     "--no-cache",
+     "--run",
+     "test/tark-command-policy.test.ts",
+     "test/suite/tark-workflow.test.ts",
+     "test/tark.test.ts",
+     "test/rpc-auth.test.ts",
+     "test/rpc-environment.test.ts",
+     "test/suite/tark-rpc-auth.test.ts",
+     "test/tark-sandbox.test.ts",
+     "--reporter=verbose"
+   ]
+     }
+   }
